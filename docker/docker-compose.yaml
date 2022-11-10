@@ -1,46 +1,109 @@
 version: "3"
-
 services:
-  app:
-    image: sravya98/scm2
+#base-done
+  base:
+    image: dockerhub.tryexa.com/exf-fhir-aws-hapi-v4/fhirawsv4/fhirbase:latest
+    #depends_on:
+    #- mongodb
+    environment:
+      MONGOATLAS_URI: mongodb+srv://exafluence:exf123@cluster0.qdfxe.mongodb.net/oauthUsers?authSource=admin&replicaSet=atlas-12xejc-shard-0&readPreference=primary&appname=MongoDB%20Compass&ssl=true
+      MONGO_CONF_DBNAME: db1_metadata
+      MONGO_DATA_DBNAME: db2_actualdata
+      MONGO_CONF_DB: mongodb+srv://luxottica:Luxottica_123@cluster0.b7bne.mongodb.net/FHIR_metadata?retryWrites=true&w=majority
+      MONGO_DATA_DB: mongodb+srv://luxottica:Luxottica_123@cluster0.b7bne.mongodb.net/FHIR_LUX_data?retryWrites=true&w=majority
+      BASE_URL: http://127.0.0.1/r4
+      REACT_URL: fhirfrontend:3000
     ports:
-      - 80:8102
+      - 8080:8080
+
+# spark-done
+  spark:
+    image: dockerhub.tryexa.com/exf-fhir-aws-hapi-v4/fhirawsv4/fhirspark:latest  
+    restart: always
+    depends_on:
+    - base
+    environment:
+      FHIR_SERVER_URL: http://127.0.0.1:8080/r4
+      csvSourceFilePath: /home/zahirbasha/fhirr4/ExfFhir/CsvFiles/
+      # SPARK_MASTER: 127.0.0.1
+      MONGO_URI: mongodb+srv://luxottica:Luxottica_123@cluster0.b7bne.mongodb.net/db1_metadata
+      REACT_URL: fhirfrontend:3000
+      GCP_JARPATH: fhir-exf/AdditionalJars
+      GCP_BUCKETNAME: fhir-exf
+      GCP_PROJECTID: fhir-305715
+      GCP_CLUSTERURL: https://dataproc.googleapis.com/v1beta2/projects/fhir-305715/regions/us-east4/clusters/
+      GCP_JOBURL: https://dataproc.googleapis.com/v1/projects/fhir-305715/regions/us-east4/jobs:submit/
+      GCP_CREDENTIALS_JSON_PATH: src/main/resources/fhir-305715-7a95d72750a7.json
+    ports:
+      - 8088:8088
+
+
+# kafka-done
+  kafkaconsumer:
+    image: dockerhub.tryexa.com/exf-fhir-aws-hapi-v4/fhirawsv4/fhirkafka:latest
+    #image: dockerhub.tryexa.com/scmxpert/consummerdocker
+    #image: bindu5483/consummerdocker
+    restart: always
+    depends_on:
+    - base
+    environment:
+      KAFKA_CONSUMER_GROUP_ID: exafluence-group
+      KAFKA_SERVER_URL: http://127.0.0.1:8083
+      PRODUCER_SERVER_URL: http://127.0.0.1:8083
+      FHIR_SERVER_URL: http://127.0.0.1/r4
+      FHIR_SERVER_PORT: 8080
+      RESOURCE_PATH: /app/data/customstatics.txt
+      MAPPINGS_FP: /app/data/metadata/mappings/
+      BOOTSTRAP_SERVER: pkc-lzvrd.us-west4.gcp.confluent.cloud:9092
+      KAFKA_USERNAME: 4XXTR2BBARWQWG2N
+      KAFKA_PASSWORD: VTB9QmypDkUusjns99b2ol7l2F7asQ4M7xY4Y1hGeCIvsBmpiBK9HlG7YcGoQVhQ
+      KAFKA_MAX_POLL_RECORDS: 500
+      KAFKA_MAX_POLL_INTERVAL_MS: 300000
+      KAFKA_FETCH_MAX_BYTES: 52428800
+      KAFKA_CONCURRENCY_TOPIC: 6
+      KAFKA_TOPIC_PATIENT: QA.Tab.OUT.totalrecall.Patient
+      KAFKA_ACTIVATION_STATUS_PATIENTTOPIC: "true"
+      KAFKA_TOPIC_PATIENT_PREFS: QA.Tab.OUT.totalrecall.PatientPrefs
+      KAFKA_ACTIVATION_STATUS_PATIENTPREFSTOPIC: "true"
+      KAFKA_TOPIC_PROVIDER: QA.Tab.OUT.totalrecall.Provider
+      KAFKA_ACTIVATION_STATUS_PROVIDERTOPIC: "true"
+      KAFKA_TOPIC_PROVIDER_CLINIC: QA.Tab.OUT.totalrecall.ProviderClinic
+      KAFKA_ACTIVATION_STATUS_PROVIDERCLINICTOPIC: "true"
+      KAFKA_TOPIC_CLINIC: QA.Tab.OUT.totalrecall.Clinic
+      KAFKA_ACTIVATION_STATUS_CLINICTOPIC: "true"
+      KAFKA_TOPIC_SCHEDULE: QA.Tab.OUT.totalrecall.Schedule 
+      KAFKA_ACTIVATION_STATUS_SCHEDULETOPIC: "true"
+      RESOURCEPATH: /app/kafka-jar/
+    ports:
+      - 8083:8083
+   
+# Frontend
+  fhirfrontend:
+    image: dockerhub.tryexa.com/exf-fhir-aws-hapi-v4/fhirawsv4/fhirfront:latest
+    restart: always
+    depends_on:
+      - base
+      - kafkaconsumer
+      - authserver
+      - spark
+    environment:
+      REACT_APP_BACKENDIP: http://127.0.0.1:8080/r4
+      REACT_APP_AUTHSERVERIP: authserver:3001
+      REACT_APP_SPARKIP: fspark:8088
+      REACT_APP_KAFKAIP: http://127.0.0.1:8083
+      # REACT_APP_AWSFHIRIP: https://0o7vp39lqh.execute-api.us-west-2.amazonaws.com/dev
+      # REACT_APP_AWS_XAPI_KEY: N8Ow8i1DhD29QWq1frqvShA5fsEqGHM3qZcgshQ9
+      # REACT_APP_KAFKANEWIP: http://localhost:8083 //to enable and use this mention env variable in config.json
+    ports:
+      - 3000:3000
+#authserver
+  authserver:
+    image: dockerhub.tryexa.com/exf-fhir-aws-hapi-v4/fhirawsv4/fhirauth:latest
+    restart: always
+    
+    environment:
+      MONGO_URI: mongodb+srv://exafluence:exf123@cluster0.qdfxe.mongodb.net/oauthUsers?authSource=admin&replicaSet=atlas-12xejc-shard-0&readPreference=primary&appname=MongoDB%20Compass&ssl=true
+      REACT_URL:  http://127.0.0.1:3000
      
-  zookeeper:
-    image: docker.io/bitnami/zookeeper:3.8
-    ports:
-      - 2181:2181
-   
-    environment:
-      - ALLOW_ANONYMOUS_LOGIN=yes
-  kafka:
-    image: docker.io/bitnami/kafka:3.2
-    ports:
-      - 9092:9092
-  
-    environment:
-      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
-      - ALLOW_PLAINTEXT_LISTENER=yes
-      
-    depends_on:
-      - zookeeper
-   
-
-  sockets:
-    image: sokser:latest
-    ports:
-      - 12345:12345
-   
-  producer:
-       
-    image: prodk:latest
-    depends_on:
-      - kafka
-      
-  consumer:
-   
-    image: consk:latest
-
-    depends_on:
-      - kafka
-      
+    ports:   
+      - 3001:3001
